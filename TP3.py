@@ -1,64 +1,70 @@
 import pandas as pd
-import re
 import matplotlib.pyplot as plt
+import re
 
-# Regex adapté au format fourni, user_agent optionnel et sans guillemets obligatoires
-log_pattern = re.compile(
-    r'(?P<ip>\S+) '                  # IP
-    r'\S+ \S+ '                     # ident et user (ignorés)
-    r'\[(?P<datetime>[^\]]+)\] '    # datetime
-    r'"(?P<method>\S+) '            # méthode HTTP
-    r'(?P<url>\S+) '                # url
-    r'\S+" '                       # protocole HTTP ignoré
-    r'(?P<status>\d{3}) '           # code statut
-    r'"?(?P<user_agent>[^"\n]*)"?' # user agent, entre guillemets optionnels
-)
+def parse_log_file(log_path):
+    log_pattern = re.compile(
+        r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s-\s-\s'             # IP et séparateurs
+        r'\[(?P<datetime>[^\]]+)\]\s'                            # datetime entre []
+        r'"(?P<method>\w+)\s(?P<url>[^\s]+)\sHTTP/1\.1"\s'      # méthode, url, HTTP/1.1
+        r'(?P<status>\d{3})?\s?'                                 # status (optionnel)
+        r'"?(?P<user_agent>[^"]*)"?'
+    )
 
-def parse_line(line):
-    match = log_pattern.match(line)
-    if match:
-        return match.groupdict()
-    else:
-        return None
-
-def load_log_to_df(filepath):
-    parsed_lines = []
-    with open(filepath, "r", encoding="utf-8", errors='ignore') as f:
+    data = []
+    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:
-            parsed = parse_line(line)
-            if parsed:
-                parsed_lines.append(parsed)
-            # Ignorer les lignes malformées silencieusement
+            m = log_pattern.search(line)
+            if m and m.group('status') is not None:
+                data.append(m.groupdict())
 
-    df = pd.DataFrame(parsed_lines)
-    df['status'] = pd.to_numeric(df['status'], errors='coerce')  # convertit en int, NaN si impossible
-    df = df.dropna(subset=['status'])  # enlever lignes sans status valide
+    df = pd.DataFrame(data)
+    print(f"[INFO] Nombre total de lignes parsées : {len(df)}")
+
+    # Convertir status en int
     df['status'] = df['status'].astype(int)
+
+    print("[INFO] Aperçu des données extraites :")
+    print(df.head())
+
     return df
 
-def main():
-    filepath = "access.log"
-
-    df = load_log_to_df(filepath)
-
-    # Filtrer erreurs 404
+def filter_404(df):
     df_404 = df[df['status'] == 404]
+    print(f"[INFO] Nombre de lignes avec erreurs 404 : {len(df_404)}")
+    print(df_404.head())
+    return df_404
 
-    # Top 5 IP fautives
-    top_ips = df_404['ip'].value_counts().head(5)
-
-    print("Top 5 IPs générant le plus d'erreurs 404 :")
+def top_5_ips(df_404):
+    top_ips = df_404.groupby('ip').size().sort_values(ascending=False).head(5)
+    print("[INFO] Top 5 des IPs générant le plus d'erreurs 404 :")
     print(top_ips)
+    return top_ips
 
-    # Visualisation
+def plot_top_ips(top_ips):
     plt.figure(figsize=(10,6))
-    top_ips.plot(kind='bar', color='tomato')
-    plt.title("Top 5 IPs générant des erreurs 404")
+    bars = plt.bar(top_ips.index, top_ips.values, color='tomato')
+
+    plt.title("Top 5 des IPs générant le plus d'erreurs 404")
     plt.xlabel("Adresse IP")
     plt.ylabel("Nombre d'erreurs 404")
     plt.xticks(rotation=45)
+
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.5, int(yval), ha='center', va='bottom')
+
     plt.tight_layout()
-    plt.show()
+    plt.savefig("top5_404_ips.png")
+    print("[INFO] Graphique sauvegardé sous 'top5_404_ips.png'")
+
+def main():
+    log_path = r"C:\Users\soule\TP1\access.log"  # adapte ce chemin
+    df = parse_log_file(log_path)
+    df_404 = filter_404(df)
+    top_ips = top_5_ips(df_404)
+    plot_top_ips(top_ips)
 
 if __name__ == "__main__":
     main()
+
